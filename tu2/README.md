@@ -1,4 +1,3 @@
-
 			
 	本章将创建一个工作队列（Work Queue），用于在多个worker中分配耗时任务。
 	工作队列背后的思想是：避免马上执行资源密集的任务，必须等待任务被执行完才执行（假如任务在被其他worker调用，等它调用完才执行）。
@@ -72,25 +71,20 @@
 		首先，我们需要确保队列在RabbitMQ节点重新启动时能够存活。为此，我们需要将其声明为持久的。
 		boolean durable = true;
 		channel.queueDeclare("hello", durable, false, false, null);
-				
-				
-				
-				
-				
-				
-				
-				
-				
-				
-				
-				
-				
-				
-				
-				
-				
-				
-				
-				
-				
-				
+	虽然这个命令本身是正确的，但当前的配置不会奏效，因为已经定义了一个hello队列，这个hello队列不是持久化的。
+	RabbitMQ不允许用不同的参数重新定义已存在的队列并返回一个错误，不过有个变通方法，定义一个不同名称的队列如：task_queue
+		boolean durable = true;
+		channel.queueDeclare("task_queue", durable, false, false, null);
+	现在修改了queueDeclare会涉及到生产者和消费者一起修改。
+	这时候我们可以确定task_queue队列不会丢失，即使RabbitMQ重启。现在我们需要标志消息持久化，通过设置MessageProperies（是BasicProperties的实现）为PERSISTENT_TEXT_PLAIN。
+		注意：标志消息持久化不能完全保证消息不会丢失，即使它告诉RabbitMQ把消息保存在磁盘，因为然后有一小段时间空窗RabbitMQ接收到了消息但还没保存。同时RabbitMQ没有为每条消息执行fsync(2)--这可能只是保存在缓存而没写到磁盘。
+			这持久化不能确保奏效，但比只做简单task queue（任务队列）要好多了，如果想有更进一步保障持久化，你可以使用publisher confirms。
+		
+	“公平调度”
+		现在的消息调度方式可能不适合实际情况，例如：一种情况是两个worker，所以基数消息都是重量级，偶数消息都是轻量级，一个worker一直执行繁忙的任务而另一个worker基本不做什么，RabbitMQ不知道这种特殊情况，所以依旧把消息平均分配。
+		之所以发生这种情况是因为当有消息进入队列，RabbitMQ直接调度消息，它不会帮消费者看未确认的消息数量，只是盲目的把消息调度出去。
+		为了解决这种问题，可以使用basicQos方法，设置预取数量（prefetchCount）为1，这会告诉RabbitMQ一次性不要给超过一条信息。换言之，在worker执行完和确认完上一条消息才调度新的消息过来（不然会先调度给下一个不忙的worker）。
+		
+	关于队列的容量
+	如果所有worker繁忙，队列会被填满，需要观察队列容量，可以添加更多worker或者使用其他策略来解决。
+	
